@@ -1,0 +1,22 @@
+{
+  "name": "uni-order-secure",
+  "version": "1.0.0",
+  "description": "uni-app 跨平台小程序 — 安全认证 + 订单管理",
+  "scripts": {
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin",
+    "dev:h5": "uni -p h5",
+    "build:h5": "uni build -p h5"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "^3.0.0",
+    "crypto-js": "^4.2.0",
+    "vue": "^2.6.14",
+    "vuex": "^3.6.2"
+  },
+  "devDependencies": {
+    "@dcloudio/uni-cli-shared": "^3.0.0",
+    "@dcloudio/webpack-uni-mp-loader": "^3.0.0",
+    "@dcloudio/webpack-uni-pages-loader": "^3.0.0"
+  }
+}
