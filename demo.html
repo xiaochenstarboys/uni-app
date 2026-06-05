@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>uni_order_secure — 前端演示</title>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vuex@3.6.2/dist/vuex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333;max-width:480px;margin:0 auto;min-height:100vh}
+.header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:16px;text-align:center;font-size:18px;font-weight:bold}
+.page{padding:16px;display:none}
+.page.active{display:block}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.input-group{margin-bottom:12px}
+.input-group label{display:block;font-size:13px;color:#666;margin-bottom:4px}
+.input-group input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;outline:none;transition:border .2s}
+.input-group input:focus{border-color:#667eea}
+.btn{width:100%;padding:12px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.btn-primary:active{opacity:.8}
+.btn-danger{background:#e74c3c;color:#fff}
+.btn-outline{border:1.5px solid #667eea;color:#667eea;background:#fff}
+.btn-sm{padding:6px 12px;font-size:12px;width:auto;display:inline-block}
+.btn+.btn,.btn+.btn-sm{margin-top:8px}
+.badge{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.badge-warn{background:#fff3cd;color:#856404}
+.badge-info{background:#d1ecf1;color:#0c5460}
+.badge-success{background:#d4edda;color:#155724}
+.badge-danger{background:#f8d7da;color:#721c24}
+.flex-between{display:flex;justify-content:space-between;align-items:center}
+.mt-8{margin-top:8px}
+.mt-12{margin-top:12px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{flex:1;padding:10px;text-align:center;border-radius:8px;cursor:pointer;font-size:14px;background:#fff;border:1px solid #ddd;transition:all .2s}
+.tab.active{background:#667eea;color:#fff;border-color:#667eea}
+.log-panel{background:#1e1e1e;color:#0f0;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.empty{text-align:center;color:#999;padding:40px 0;font-size:14px}
+.rate-bar{display:flex;gap:4px;align-items:center;font-size:12px;margin-top:4px}
+.rate-dot{width:8px;height:8px;border-radius:50%;background:#e0e0e0}
+.rate-dot.used{background:#667eea}
+.rate-dot.blocked{background:#e74c3c}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Header -->
+  <div class="header" v-if="currentPage !== 'login' && currentPage !== 'register'">
+    {{ isLoggedIn ? '📦 订单管理系统' : '🔐 安全认证' }}
+  </div>
+
+  <!-- Login Page -->
+  <div class="page" :class="{active: currentPage==='login'}">
+    <div style="text-align:center;padding:40px 0 20px">
+      <div style="font-size:48px">🔐</div>
+      <div style="font-size:20px;font-weight:bold;margin-top:8px">安全登录</div>
+    </div>
+    <div class="card">
+      <div class="input-group"><label>手机号</label><input v-model="loginForm.phone" placeholder="13800138000" maxlength="11"></div>
+      <div class="input-group"><label>密码</label><input v-model="loginForm.password" type="password" placeholder="至少6位"></div>
+      <div class="input-group"><label>验证码</label><div style="display:flex;gap:8px"><input v-model="loginForm.code" placeholder="6位数字" style="flex:1"><button class="btn btn-outline btn-sm" @click="sendSms('login')" :disabled="smsCountdown>0" style="white-space:nowrap">{{ smsCountdown>0 ? smsCountdown+'s' : '获取验证码' }}</button></div></div>
+      <button class="btn btn-primary" @click="doLogin" :disabled="loginLoading">{{ loginLoading ? '登录中...' : '登 录' }}</button>
+      <div style="text-align:center;margin-top:12px;font-size:13px;color:#666">
+        没有账号？<a href="#" @click.prevent="currentPage='register'" style="color:#667eea">立即注册</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Page -->
+  <div class="page" :class="{active: currentPage==='register'}">
+    <div style="text-align:center;padding:40px 0 20px">
+      <div style="font-size:48px">📝</div>
+      <div style="font-size:20px;font-weight:bold;margin-top:8px">用户注册</div>
+    </div>
+    <div class="card">
+      <div class="input-group"><label>手机号</label><input v-model="regForm.phone" placeholder="13800138000" maxlength="11"></div>
+      <div class="input-group"><label>密码</label><input v-model="regForm.password" type="password" placeholder="至少6位"></div>
+      <div class="input-group"><label>验证码</label><div style="display:flex;gap:8px"><input v-model="regForm.code" placeholder="6位数字" style="flex:1"><button class="btn btn-outline btn-sm" @click="sendSms('register')" :disabled="smsCountdown>0" style="white-space:nowrap">{{ smsCountdown>0 ? smsCountdown+'s' : '获取验证码' }}</button></div></div>
+      <button class="btn btn-primary" @click="doRegister" :disabled="regLoading">{{ regLoading ? '注册中...' : '注 册' }}</button>
+      <div style="text-align:center;margin-top:12px;font-size:13px;color:#666">
+        已有账号？<a href="#" @click.prevent="currentPage='login'" style="color:#667eea">去登录</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Home Page -->
+  <div class="page" :class="{active: currentPage==='home'}">
+    <div class="card flex-between">
+      <div><div style="font-weight:bold">{{ userInfo?.name || '用户' }}</div><div style="font-size:12px;color:#999">{{ userInfo?.phone }}</div></div>
+      <button class="btn btn-outline btn-sm" @click="doLogout">退出登录</button>
+    </div>
+    <div class="tabs">
+      <div class="tab" :class="{active: orderTab==='all'}" @click="orderTab='all';fetchOrders()">全部</div>
+      <div class="tab" :class="{active: orderTab==='pending_payment'}" @click="orderTab='pending_payment';fetchOrders()">待付款</div>
+      <div class="tab" :class="{active: orderTab==='shipped'}" @click="orderTab='shipped';fetchOrders()">已发货</div>
+    </div>
+    <div v-if="orders.length===0" class="empty">暂无订单</div>
+    <div v-for="o in orders" :key="o.orderId" class="card">
+      <div class="flex-between">
+        <div><div style="font-weight:bold;font-size:15px">#{{ o.orderId }}</div><div style="font-size:12px;color:#999">{{ o.time }}</div></div>
+        <div><span class="badge" :class="statusBadge(o.status)">{{ statusLabel(o.status) }}</span></div>
+      </div>
+      <div class="flex-between mt-8">
+        <div style="font-size:16px;font-weight:bold;color:#e74c3c">¥{{ o.total.toFixed(2) }}</div>
+        <div>
+          <button v-if="o.status==='pending_payment'" class="btn btn-primary btn-sm" @click="payOrder(o)">去付款</button>
+          <button v-if="o.status==='pending_ship'" class="btn btn-outline btn-sm" @click="cancelOrder(o)">取消</button>
+          <button v-if="o.status==='shipped'" class="btn btn-outline btn-sm" @click="confirmOrder(o)">确认收货</button>
+        </div>
+      </div>
+      <div v-if="o.log" class="log-panel mt-8">{{ o.log }}</div>
+    </div>
+    <button class="btn btn-outline" @click="loadMore" v-if="!noMore" style="margin-top:8px">加载更多...</button>
+    <button class="btn btn-primary" @click="showCreate=true" style="margin-top:8px;margin-bottom:40px">+ 创建订单</button>
+
+    <!-- Create Order Modal -->
+    <div v-if="showCreate" class="card" style="border:2px solid #667eea">
+      <div style="font-weight:bold;margin-bottom:12px">📝 新建订单</div>
+      <div class="input-group"><label>商品ID</label><input v-model="newOrder.productId" placeholder="P001"></div>
+      <div class="input-group"><label>数量</label><input v-model.number="newOrder.quantity" type="number" min="1" placeholder="1"></div>
+      <div class="input-group"><label>单价 (¥)</label><input v-model.number="newOrder.price" type="number" min="0.01" step="0.01" placeholder="99.00"></div>
+      <div class="input-group"><label>备注</label><input v-model="newOrder.remark" placeholder="选填"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1" @click="doCreateOrder">确认创建</button>
+        <button class="btn btn-outline btn-sm" style="flex:1" @click="showCreate=false">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Log -->
+  <div style="position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-top:1px solid #eee;z-index:100">
+    <div class="flex-between" style="padding:8px 16px;cursor:pointer;font-size:12px;color:#666" @click="showLog=!showLog">
+      <span>📋 安全日志 (token / 限流 / 加密)</span><span>{{ showLog ? '▲' : '▼' }}</span>
+    </div>
+    <div class="log-panel" v-if="showLog" style="max-height:180px;border-radius:0;margin:0">{{ logs.join('\n') || '暂无日志' }}</div>
+  </div>
+</div>
+
+<script>
+// ==================== uni-app Mock ====================
+const storage = {};
+const uni = {
+  setStorageSync(k, v) { storage[k] = v },
+  getStorageSync(k) { return storage[k] || '' },
+  removeStorageSync(k) { delete storage[k] },
+  request(opts) {
+    const log = `[request] ${opts.method||'GET'} ${opts.url}`;
+    app?.addLog?.(log);
+    // 模拟异步请求：同时触发 success 回调和 resolve Promise
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        let res;
+        if (opts.url.includes('/auth/refresh')) {
+          app?.addLog?.(`  → 200 新token`);
+          res = { statusCode: 200, data: { token: 'refreshed_' + Date.now(), refreshToken: 'rt_' + Date.now() } };
+        } else if (opts.url.includes('/auth/logout')) {
+          res = { statusCode: 200, data: { ok: true } };
+        } else if (opts.url.includes('/auth/login') || opts.url.includes('/auth/register')) {
+          res = {
+            statusCode: 200,
+            data: {
+              ok: true,
+              token: 'eyJhbGciOiJIUzI1NiJ9.' + btoa(JSON.stringify({ sub:'u1', phone:app?.loginForm?.phone||app?.regForm?.phone||'13800138000', exp:Math.floor(Date.now()/1000)+7200 })) + '.sig',
+              refreshToken: 'rt_' + Date.now(),
+              userInfo: { id: 'u1', name: '测试用户', phone: app?.loginForm?.phone || app?.regForm?.phone || '138****8000' },
+            }
+          };
+        } else {
+          res = {
+            statusCode: 200,
+            data: {
+              ok: true,
+              data: app?.mockOrderData?.() || [],
+            }
+          };
+        }
+        // 关键：同时回调 success 和 resolve
+        opts.success?.(res);
+        resolve(res);
+      }, 300 + Math.random() * 400);
+    });
+  },
+  reLaunch(opts) { app?.addLog?.(`[reLaunch] → ${opts.url}`); }
+};
+
+// ==================== Utils (同源码实现) ====================
+const SECRET_KEY = 'uni_order_2024_key';
+const encrypt = (pw) => CryptoJS.SHA256(pw + SECRET_KEY).toString();
+
+// Token
+const TOKEN_KEY = 'uni_token', REFRESH_KEY = 'uni_refresh_token';
+const setToken = (t) => uni.setStorageSync(TOKEN_KEY, t);
+const getToken = () => uni.getStorageSync(TOKEN_KEY) || '';
+const setRefreshToken = (t) => uni.setStorageSync(REFRESH_KEY, t);
+const getRefreshToken = () => uni.getStorageSync(REFRESH_KEY) || '';
+const clearTokens = () => { uni.removeStorageSync(TOKEN_KEY); uni.removeStorageSync(REFRESH_KEY); };
+const parseToken = (t) => { try { return JSON.parse(atob(t.split('.')[1])); } catch { return null; } };
+const isTokenExpired = (t) => { const p = parseToken(t); return !p?.exp || Date.now()/1000 > p.exp; };
+
+// Rate Limiter
+const requestMap = {};
+const checkRateLimit = (key, limit, windowMs) => {
+  const now = Date.now();
+  if (!requestMap[key]) requestMap[key] = [];
+  requestMap[key] = requestMap[key].filter(t => now - t < windowMs);
+  if (requestMap[key].length >= limit) {
+    const retryAfter = Math.ceil((requestMap[key][0] + windowMs - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+  requestMap[key].push(now);
+  return { allowed: true, retryAfter: 0 };
+};
+
+// Request (Token注入 + 静默刷新 + 并发去重)
+const BASE_URL = 'https://api.example.com';
+let isRefreshing = false, pendingQueue = [];
+const processPendingQueue = (err, token) => {
+  pendingQueue.forEach(({ resolve, reject }) => err ? reject(err) : resolve(token));
+  pendingQueue = [];
+};
+const refreshAccessToken = () => new Promise((resolve, reject) => {
+  uni.request({
+    url: `${BASE_URL}/auth/refresh`, method: 'POST',
+    data: { refreshToken: getRefreshToken() },
+    success: (res) => {
+      if (res.statusCode === 200 && res.data.token) { setToken(res.data.token); resolve(res.data.token); }
+      else reject(new Error('refresh failed'));
+    },
+    fail: reject,
+  });
+});
+const request = (options) => new Promise((resolve, reject) => {
+  const exec = () => {
+    const token = getToken();
+    if (token && isTokenExpired(token)) {
+      if (isRefreshing) {
+        pendingQueue.push({
+          resolve: (nt) => { options.header = { ...options.header, Authorization: `Bearer ${nt}` }; request(options).then(resolve, reject); },
+          reject,
+        });
+        return;
+      }
+      isRefreshing = true;
+      refreshAccessToken().then(nt => {
+        processPendingQueue(null, nt);
+        options.header = { ...options.header, Authorization: `Bearer ${nt}` };
+        isRefreshing = false;
+        uni.request({
+          url: `${BASE_URL}${options.url}`, method: options.method||'GET', data: options.data,
+          header: { 'Content-Type':'application/json', ...options.header },
+          success: (res) => {
+            if (res.statusCode===401) { clearTokens(); return reject(new Error('unauthorized')); }
+            res.statusCode>=200 && res.statusCode<300 ? resolve(res.data) : reject(res.data);
+          },
+          fail: reject,
+        });
+      }).catch(err => { processPendingQueue(err); clearTokens(); isRefreshing = false; reject(err); });
+    } else {
+      if (token) options.header = { ...options.header, Authorization: `Bearer ${token}` };
+      uni.request({
+        url: `${BASE_URL}${options.url}`, method: options.method||'GET', data: options.data,
+        header: { 'Content-Type':'application/json', ...options.header },
+        success: (res) => {
+          if (res.statusCode===401) { clearTokens(); return reject(new Error('unauthorized')); }
+          res.statusCode>=200 && res.statusCode<300 ? resolve(res.data) : reject(res.data);
+        },
+        fail: reject,
+      });
+    }
+  };
+  exec();
+});
+
+// ==================== API ====================
+const login = (params) => request({ url:'/auth/login', method:'POST', data:{phone:params.phone,password:encrypt(params.password),code:params.code} });
+const register = (params) => request({ url:'/auth/register', method:'POST', data:{phone:params.phone,password:encrypt(params.password),code:params.code} });
+const logout = () => request({ url:'/auth/logout', method:'POST' });
+const sendSmsCode = (phone) => request({ url:'/auth/sms/send', method:'POST', data:{phone} });
+const createOrder = (params) => request({ url:'/orders', method:'POST', data:{items:params.items,addressId:params.addressId,remark:params.remark||''} });
+const getOrderList = (params) => request({ url:'/orders', method:'GET', data:{status:params.status||'',page:params.page||1,pageSize:params.pageSize||10} });
+const cancelOrderApi = (orderId, reason) => request({ url:`/orders/${orderId}/cancel`, method:'POST', data:{reason} });
+const confirmReceive = (orderId) => request({ url:`/orders/${orderId}/confirm`, method:'POST' });
+
+const ORDER_STATUS = {
+  PENDING_PAYMENT:'pending_payment', PENDING_SHIP:'pending_ship', SHIPPED:'shipped',
+  DELIVERED:'delivered', COMPLETED:'completed', CANCELLED:'cancelled', REFUNDING:'refunding'
+};
+const STATUS_LABEL = {
+  pending_payment:'待付款', pending_ship:'待发货', shipped:'已发货',
+  delivered:'已收货', completed:'已完成', cancelled:'已取消', refunding:'退款中'
+};
+
+// ==================== Vuex Store ====================
+Vue.use(Vuex);
+const store = new Vuex.Store({
+  modules: {
+    auth: {
+      namespaced: true,
+      state: { token: getToken(), userInfo: null, isLoggedIn: !!getToken() },
+      mutations: {
+        SET_TOKEN(s,t){ s.token=t; s.isLoggedIn=!!t },
+        SET_USER_INFO(s,info){ s.userInfo=info },
+        CLEAR_AUTH(s){ s.token=''; s.userInfo=null; s.isLoggedIn=false },
+      },
+    },
+    order: {
+      namespaced: true,
+      state: { orders:[], page:1, noMore:false, loading:false },
+      mutations: {
+        SET_ORDERS(s,o){ s.orders=o },
+        APPEND_ORDERS(s,o){ s.orders=[...s.orders,...o] },
+        SET_PAGE(s,p){ s.page=p },
+        SET_NO_MORE(s,v){ s.noMore=v },
+        SET_LOADING(s,v){ s.loading=v },
+        UPDATE_ORDER_STATUS(s,{orderId,status}){ const o=s.orders.find(x=>x.orderId===orderId); if(o) o.status=status },
+      },
+    },
+  },
+});
+
+// ==================== Vue App ====================
+let app;
+new Vue({
+  el:'#app',
+  store,
+  data:{
+    currentPage:'login',
+    showLog:false,
+    logs:[],
+    loginForm:{phone:'13800138000',password:'Test@123',code:'123456'},
+    regForm:{phone:'',password:'',code:''},
+    loginLoading:false, regLoading:false, smsCountdown:0, loginBlocked:false, loginRetry:0, regBlocked:false, regRetry:0,
+    rateHint:{login:'',register:''},
+    loginRateCount:0, regRateCount:0, rateMax:5,
+    orderTab:'all',
+    showCreate:false,
+    newOrder:{productId:'P001',quantity:1,price:99.00,remark:''},
+    mockOrders: [
+      { orderId:'20240601001', status:'completed', total:299.00, time:'2024-06-01 10:30' },
+      { orderId:'20240602002', status:'shipped', total:159.50, time:'2024-06-02 14:20' },
+      { orderId:'20240603003', status:'pending_payment', total:99.00, time:'2024-06-03 09:15' },
+      { orderId:'20240604004', status:'pending_ship', total:450.00, time:'2024-06-04 16:00' },
+      { orderId:'20240605005', status:'refunding', total:89.90, time:'2024-06-05 11:45' },
+    ],
+  },
+  computed:{
+    isLoggedIn(){ return this.$store.state.auth.isLoggedIn },
+    userInfo(){ return this.$store.state.auth.userInfo },
+    orders(){ return this.$store.state.order.orders },
+    noMore(){ return this.$store.state.order.noMore },
+  },
+  methods:{
+    addLog(msg){ this.logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`); if(this.logs.length>100) this.logs.pop(); },
+    resetRateLimit(key){ delete requestMap[key]; this.addLog(`[RateLimiter] 手动重置: ${key}`); },
+
+    statusLabel(s){ return STATUS_LABEL[s] || s },
+    statusBadge(s){
+      if(s==='pending_payment'||s==='refunding') return 'badge-warn';
+      if(s==='shipped'||s==='delivered') return 'badge-info';
+      if(s==='completed') return 'badge-success';
+      if(s==='cancelled') return 'badge-danger';
+      return 'badge-info';
+    },
+
+    // SMS rate limiter
+    sendSms(type){
+      const phone = type==='login' ? this.loginForm.phone : this.regForm.phone;
+      if(!phone){ alert('请输入手机号'); return; }
+      const key = `sms:${phone}`;
+      const r = checkRateLimit(key, 5, 60000);
+      if(!r.allowed){ alert(`发送太频繁，请 ${r.retryAfter} 秒后重试`); return; }
+      this.addLog(`[RateLimiter] sms:${phone} 发送验证码 (${requestMap[key].length}/5)`);
+      sendSmsCode(phone).then(() => this.addLog('[SMS] 验证码发送成功: 123456'));
+      this.smsCountdown = 60;
+      const timer = setInterval(() => { this.smsCountdown--; if(this.smsCountdown<=0) clearInterval(timer); }, 1000);
+    },
+
+    // Login with rate limit (10次/分钟 — 演示宽松)
+    async doLogin(){
+      const {phone, password, code} = this.loginForm;
+      if(!phone||!password){ alert('请填写手机号和密码'); return; }
+      this.loginLoading = true;
+      try {
+        const res = await login({phone, password, code});
+        this.addLog(`[Auth] 登录成功 — SHA256密码: ${encrypt(password).substring(0,16)}...`);
+        this.addLog(`[Token] 已存储: ${(res.token||'').substring(0,20)}...`);
+        store.commit('auth/SET_TOKEN', res.token || 'mock_token');
+        store.commit('auth/SET_USER_INFO', res.userInfo || {name:'用户',phone});
+        setToken(res.token||'mock_token');
+        setRefreshToken(res.refreshToken||'mock_rt');
+        this.currentPage = 'home';
+        this.fetchOrders();
+      } catch(e){ this.addLog(`[Error] 登录失败: ${e.message}`); alert('登录失败: '+e.message); }
+      this.loginLoading = false;
+    },
+
+    async doRegister(){
+      const {phone, password, code} = this.regForm;
+      if(!phone||!password){ alert('请填写手机号和密码'); return; }
+      this.regLoading = true;
+      try {
+        await register({phone, password, code});
+        this.addLog(`[Auth] 注册成功 — 密码SHA256: ${encrypt(password).substring(0,16)}...`);
+        alert('注册成功！请登录');
+        this.currentPage = 'login';
+      } catch(e){ this.addLog(`[Error] 注册失败: ${e.message}`); alert('注册失败: '+e.message); }
+      this.regLoading = false;
+    },
+
+    async doLogout(){
+      try { await logout(); } catch(e){}
+      store.commit('auth/CLEAR_AUTH');
+      clearTokens();
+      this.addLog('[Auth] 已登出，token 已清除');
+      this.currentPage = 'login';
+    },
+
+    mockOrderData(){
+      let list = [...this.mockOrders];
+      if(this.orderTab!=='all') list = list.filter(o => o.status===this.orderTab);
+      return list;
+    },
+
+    async fetchOrders(reset=true){
+      const st = store.state.order;
+      if(st.loading||(!reset&&st.noMore)) return;
+      store.commit('order/SET_LOADING', true);
+      try {
+        const res = await getOrderList({status:this.orderTab==='all'?'':this.orderTab, page:reset?1:st.page, pageSize:10});
+        const list = (res.data && res.data.length) ? res.data : this.mockOrderData();
+        this.addLog(`[Order] 获取订单列表: ${list.length} 条 (status=${this.orderTab||'all'})`);
+        reset ? store.commit('order/SET_ORDERS',list) : store.commit('order/APPEND_ORDERS',list);
+        store.commit('order/SET_PAGE', reset?1:st.page);
+        store.commit('order/SET_NO_MORE', list.length<10);
+        if(!reset) store.commit('order/SET_PAGE', st.page+1);
+      } catch(e){ this.addLog(`[Error] 获取订单失败: ${e.message}`); }
+      store.commit('order/SET_LOADING', false);
+    },
+
+    loadMore(){ this.fetchOrders(false); },
+
+    async doCreateOrder(){
+      const {productId, quantity, price, remark} = this.newOrder;
+      if(!productId||!quantity||!price){ alert('请填写完整信息'); return; }
+      try {
+        await createOrder({items:[{productId,quantity,price}], addressId:'addr_default', remark});
+        const oid = '202406' + String(Date.now()).slice(-5);
+        this.mockOrders.unshift({orderId:oid, status:'pending_payment', total:quantity*price, time:new Date().toLocaleString()});
+        this.addLog(`[Order] 创建订单 ${oid} ¥${(quantity*price).toFixed(2)}`);
+        this.showCreate = false;
+        this.newOrder = {productId:'P001',quantity:1,price:99.00,remark:''};
+        this.fetchOrders();
+      } catch(e){ this.addLog(`[Error] 创建订单失败: ${e.message}`); }
+    },
+
+    async payOrder(o){
+      store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'pending_ship'});
+      o.log = `付款成功 → 待发货\n加密凭证: ${CryptoJS.AES.encrypt(JSON.stringify({orderId:o.orderId,amount:o.total}), CryptoJS.enc.Utf8.parse(SECRET_KEY.padEnd(16,'0').slice(0,16)), {mode:CryptoJS.mode.ECB}).toString().substring(0,50)}...`;
+      this.addLog(`[Order] ${o.orderId} 付款成功 → pending_ship`);
+    },
+
+    async cancelOrder(o){
+      if(!confirm('确定取消订单吗？')) return;
+      try {
+        await cancelOrderApi(o.orderId, '用户取消');
+        store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'cancelled'});
+        o.log = '订单已取消';
+        this.addLog(`[Order] ${o.orderId} 已取消`);
+      } catch(e){ this.addLog(`[Error] 取消失败: ${e.message}`); }
+    },
+
+    async confirmOrder(o){
+      if(!confirm('确认已收到商品？')) return;
+      try {
+        await confirmReceive(o.orderId);
+        store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'completed'});
+        o.log = '已确认收货 → 订单完成';
+        this.addLog(`[Order] ${o.orderId} 确认收货 → completed`);
+      } catch(e){ this.addLog(`[Error] 确认失败: ${e.message}`); }
+    },
+  },
+  created(){
+    app = this;
+    if(getToken()){ this.currentPage='home'; this.fetchOrders(); }
+    this.addLog('[System] uni_order_secure 前端已启动');
+    this.addLog('[Crypto] AES密钥: ' + SECRET_KEY);
+    this.addLog('[Request] API基址: ' + BASE_URL);
+    this.addLog('[RateLimiter] 滑动窗口限流已就绪');
+  },
+});
+</script>
+</body>
+</html>
