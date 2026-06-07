@@ -59,7 +59,6 @@ export default {
   props: {
     order: { type: Object, required: true },
   },
-  emits: ['cancel', 'confirm', 'detail'],
 
   computed: {
     statusLabel() {
@@ -72,7 +71,7 @@ export default {
 
   methods: {
     goPay() {
-      uni.navigateTo({ url: `/pages/order/pay?orderId=${this.order.orderId}` })
+      uni.showToast({ title: '支付功能开发中', icon: 'none' })
     },
   },
 }

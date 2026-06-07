@@ -93,11 +93,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <button class="btn btn-outline btn-sm" @click="doLogout">退出登录</button>
     </div>
     <div class="tabs">
-      <div class="tab" :class="{active: orderTab==='all'}" @click="orderTab='all';fetchOrders()">全部</div>
-      <div class="tab" :class="{active: orderTab==='pending_payment'}" @click="orderTab='pending_payment';fetchOrders()">待付款</div>
-      <div class="tab" :class="{active: orderTab==='shipped'}" @click="orderTab='shipped';fetchOrders()">已发货</div>
+      <div class="tab" :class="{active: orderTab==='all'}" @click="switchTab('all')">全部</div>
+      <div class="tab" :class="{active: orderTab==='pending_payment'}" @click="switchTab('pending_payment')">待付款</div>
+      <div class="tab" :class="{active: orderTab==='shipped'}" @click="switchTab('shipped')">已发货</div>
     </div>
-    <div v-if="orders.length===0" class="empty">暂无订单</div>
+    <div v-if="orders.length===0 && !orderLoading" class="empty">暂无订单</div>
+    <div v-if="orderLoading" class="empty" style="color:#667eea">加载中...</div>
     <div v-for="o in orders" :key="o.orderId" class="card">
       <div class="flex-between">
         <div><div style="font-weight:bold;font-size:15px">#{{ o.orderId }}</div><div style="font-size:12px;color:#999">{{ o.time }}</div></div>
@@ -180,7 +181,7 @@ const uni = {
         // 关键：同时回调 success 和 resolve
         opts.success?.(res);
         resolve(res);
-      }, 300 + Math.random() * 400);
+      }, 80 + Math.random() * 120);
     });
   },
   reLaunch(opts) { app?.addLog?.(`[reLaunch] → ${opts.url}`); }
@@ -336,6 +337,8 @@ new Vue({
     rateHint:{login:'',register:''},
     loginRateCount:0, regRateCount:0, rateMax:5,
     orderTab:'all',
+    orderLoading: false,
+    allOrdersCache: [],
     showCreate:false,
     newOrder:{productId:'P001',quantity:1,price:99.00,remark:''},
     mockOrders: [
@@ -392,7 +395,9 @@ new Vue({
         setToken(res.token||'mock_token');
         setRefreshToken(res.refreshToken||'mock_rt');
         this.currentPage = 'home';
-        this.fetchOrders();
+        this.allOrdersCache = [...this.mockOrders];  // 确保缓存就绪
+        this.switchTab('all');
+        this._initOrders();                           // 后台刷新
       } catch(e){ this.addLog(`[Error] 登录失败: ${e.message}`); alert('登录失败: '+e.message); }
       this.loginLoading = false;
     },
@@ -424,14 +429,47 @@ new Vue({
       return list;
     },
 
+    // 切Tab：纯本地过滤，零网络延迟
+    switchTab(tab){
+      this.orderTab = tab;
+      // 本地过滤（instant — 无API调用）
+      const filtered = tab === 'all'
+        ? [...this.allOrdersCache]
+        : this.allOrdersCache.filter(o => o.status === tab);
+      store.commit('order/SET_ORDERS', filtered);
+      this.addLog(`[Order] 本地过滤: ${filtered.length} 条 (tab=${tab})`);
+    },
+
+    // 首次进入首页时异步加载订单（后台静默刷新缓存）
+    async _initOrders(){
+      this.orderLoading = true;
+      try {
+        const res = await getOrderList({status:'', page:1, pageSize:100});
+        const list = (res.data && res.data.length) ? res.data : [...this.mockOrders];
+        this.allOrdersCache = list;
+        this.addLog(`[Order] 订单缓存已加载: ${list.length} 条`);
+      } catch(e){
+        this.addLog(`[Order] 使用mock数据: ${this.allOrdersCache.length} 条`);
+      }
+      // 刷新当前Tab视图
+      const filtered = this.orderTab === 'all'
+        ? [...this.allOrdersCache]
+        : this.allOrdersCache.filter(o => o.status === this.orderTab);
+      store.commit('order/SET_ORDERS', filtered);
+      this.orderLoading = false;
+    },
+
     async fetchOrders(reset=true){
       const st = store.state.order;
       if(st.loading||(!reset&&st.noMore)) return;
       store.commit('order/SET_LOADING', true);
       try {
-        const res = await getOrderList({status:this.orderTab==='all'?'':this.orderTab, page:reset?1:st.page, pageSize:10});
+        const status = this.orderTab==='all'?'':this.orderTab;
+        const res = await getOrderList({status, page:reset?1:st.page, pageSize:10});
         const list = (res.data && res.data.length) ? res.data : this.mockOrderData();
-        this.addLog(`[Order] 获取订单列表: ${list.length} 条 (status=${this.orderTab||'all'})`);
+        // 更新缓存
+        if (reset && status==='') this.allOrdersCache = [...list];
+        this.addLog(`[Order] 刷新订单列表: ${list.length} 条 (status=${this.orderTab||'all'})`);
         reset ? store.commit('order/SET_ORDERS',list) : store.commit('order/APPEND_ORDERS',list);
         store.commit('order/SET_PAGE', reset?1:st.page);
         store.commit('order/SET_NO_MORE', list.length<10);
@@ -452,12 +490,20 @@ new Vue({
         this.addLog(`[Order] 创建订单 ${oid} ¥${(quantity*price).toFixed(2)}`);
         this.showCreate = false;
         this.newOrder = {productId:'P001',quantity:1,price:99.00,remark:''};
-        this.fetchOrders();
+        this.allOrdersCache.unshift({orderId:oid, status:'pending_payment', time:new Date().toLocaleString(), total:quantity*price});  // 插入缓存
+        this.switchTab('all');
       } catch(e){ this.addLog(`[Error] 创建订单失败: ${e.message}`); }
+    },
+
+    // 同步缓存中的订单状态
+    _syncCache(orderId, status){
+      const c = this.allOrdersCache.find(x => x.orderId === orderId);
+      if (c) c.status = status;
     },
 
     async payOrder(o){
       store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'pending_ship'});
+      this._syncCache(o.orderId, 'pending_ship');
       o.log = `付款成功 → 待发货\n加密凭证: ${CryptoJS.AES.encrypt(JSON.stringify({orderId:o.orderId,amount:o.total}), CryptoJS.enc.Utf8.parse(SECRET_KEY.padEnd(16,'0').slice(0,16)), {mode:CryptoJS.mode.ECB}).toString().substring(0,50)}...`;
       this.addLog(`[Order] ${o.orderId} 付款成功 → pending_ship`);
     },
@@ -467,6 +513,7 @@ new Vue({
       try {
         await cancelOrderApi(o.orderId, '用户取消');
         store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'cancelled'});
+        this._syncCache(o.orderId, 'cancelled');
         o.log = '订单已取消';
         this.addLog(`[Order] ${o.orderId} 已取消`);
       } catch(e){ this.addLog(`[Error] 取消失败: ${e.message}`); }
@@ -477,6 +524,7 @@ new Vue({
       try {
         await confirmReceive(o.orderId);
         store.commit('order/UPDATE_ORDER_STATUS',{orderId:o.orderId,status:'completed'});
+        this._syncCache(o.orderId, 'completed');
         o.log = '已确认收货 → 订单完成';
         this.addLog(`[Order] ${o.orderId} 确认收货 → completed`);
       } catch(e){ this.addLog(`[Error] 确认失败: ${e.message}`); }
@@ -484,7 +532,13 @@ new Vue({
   },
   created(){
     app = this;
-    if(getToken()){ this.currentPage='home'; this.fetchOrders(); }
+    // 预填充缓存（mockOrders 直接可用，切换Tab不再等API）
+    this.allOrdersCache = [...this.mockOrders];
+    if(getToken()){
+      this.currentPage='home';
+      this.switchTab('all');           // 本地过滤即时显示（0ms延迟）
+      this._initOrders();              // 后台异步刷新缓存
+    }
     this.addLog('[System] uni_order_secure 前端已启动');
     this.addLog('[Crypto] AES密钥: ' + SECRET_KEY);
     this.addLog('[Request] API基址: ' + BASE_URL);

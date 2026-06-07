@@ -50,10 +50,14 @@
 </template>
 
 <script>
-import { login, sendSmsCode } from '@/api/auth.js'
+import { login } from '@/api/auth.js'
 import { checkRateLimit } from '@/utils/rateLimiter.js'
+import { validatePhone } from '@/utils/validator.js'
+import authForm from '@/mixins/authForm.js'
 
 export default {
+  mixins: [authForm],
+
   data() {
     return {
       form: { phone: '', password: '', code: '' },
@@ -64,45 +68,10 @@ export default {
     }
   },
 
-  onUnload() {
-    clearInterval(this.timer)
-  },
-
   methods: {
-    validatePhone() {
-      return /^1[3-9]\d{9}$/.test(this.form.phone)
-    },
-
-    async handleSendCode() {
-      if (!this.validatePhone()) {
-        return uni.showToast({ title: '手机号格式有误', icon: 'none' })
-      }
-
-      // 前端限流：同一手机号 60s 内最多发 1 次
-      const { allowed, retryAfter } = checkRateLimit(`sms:${this.form.phone}`, 1, 60000)
-      if (!allowed) {
-        return uni.showToast({ title: `请 ${retryAfter}s 后再试`, icon: 'none' })
-      }
-
-      try {
-        await sendSmsCode(this.form.phone)
-        this.startCountdown(60)
-        uni.showToast({ title: '验证码已发送', icon: 'success' })
-      } catch (e) {
-        uni.showToast({ title: e.message || '发送失败', icon: 'none' })
-      }
-    },
-
-    startCountdown(seconds) {
-      this.countdown = seconds
-      this.timer = setInterval(() => {
-        this.countdown--
-        if (this.countdown <= 0) clearInterval(this.timer)
-      }, 1000)
-    },
-
     async handleLogin() {
-      if (!this.validatePhone()) return uni.showToast({ title: '手机号格式有误', icon: 'none' })
+      this.form.phone = this.form.phone.trim()
+      if (!validatePhone(this.form.phone)) return uni.showToast({ title: '手机号格式有误', icon: 'none' })
       if (!this.form.password) return uni.showToast({ title: '请输入密码', icon: 'none' })
       if (!this.form.code) return uni.showToast({ title: '请输入验证码', icon: 'none' })
 

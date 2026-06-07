@@ -67,6 +67,7 @@
 
 <script>
 import { logout } from '@/api/auth.js'
+import { getOrderList } from '@/api/order.js'
 import { parseToken, getToken } from '@/utils/token.js'
 
 export default {
@@ -88,7 +89,26 @@ export default {
     },
   },
 
+  onShow() {
+    this.fetchStats()
+  },
+
   methods: {
+    async fetchStats() {
+      try {
+        const res = await getOrderList({ page: 1, pageSize: 100 })
+        const orders = res.data || []
+        this.stats = {
+          pendingPayment: orders.filter(o => o.status === 'pending_payment').length,
+          pendingShip: orders.filter(o => o.status === 'pending_ship').length,
+          shipped: orders.filter(o => o.status === 'shipped').length,
+          completed: orders.filter(o => o.status === 'completed').length,
+        }
+      } catch {
+        // 静默失败，保持 stats 为 0
+      }
+    },
+
     goOrders(status) {
       uni.switchTab({ url: '/pages/order/list' })
     },

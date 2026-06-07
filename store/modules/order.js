@@ -49,16 +49,15 @@ const actions = {
       const list = res.data || []
       if (reset) {
         commit('SET_ORDERS', list)
-        commit('SET_PAGE', 1)
         commit('SET_NO_MORE', false)
       } else {
         commit('APPEND_ORDERS', list)
       }
+      // 统一处理分页状态
       if (list.length < 10) {
         commit('SET_NO_MORE', true)
-      } else {
-        commit('SET_PAGE', page + 1)
       }
+      commit('SET_PAGE', page + (list.length < 10 ? 0 : 1))
     } finally {
       commit('SET_LOADING', false)
     }

@@ -57,10 +57,14 @@
 </template>
 
 <script>
-import { register, sendSmsCode } from '@/api/auth.js'
+import { register } from '@/api/auth.js'
 import { checkRateLimit } from '@/utils/rateLimiter.js'
+import { validatePhone, validatePassword } from '@/utils/validator.js'
+import authForm from '@/mixins/authForm.js'
 
 export default {
+  mixins: [authForm],
+
   data() {
     return {
       form: { phone: '', password: '', confirmPassword: '', code: '' },
@@ -71,50 +75,11 @@ export default {
     }
   },
 
-  onUnload() {
-    clearInterval(this.timer)
-  },
-
   methods: {
-    validatePhone() {
-      return /^1[3-9]\d{9}$/.test(this.form.phone)
-    },
-
-    validatePassword() {
-      // 至少8位，包含字母和数字
-      return /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(this.form.password)
-    },
-
-    async handleSendCode() {
-      if (!this.validatePhone()) {
-        return uni.showToast({ title: '手机号格式有误', icon: 'none' })
-      }
-
-      const { allowed, retryAfter } = checkRateLimit(`sms:${this.form.phone}`, 1, 60000)
-      if (!allowed) {
-        return uni.showToast({ title: `请 ${retryAfter}s 后再试`, icon: 'none' })
-      }
-
-      try {
-        await sendSmsCode(this.form.phone)
-        this.startCountdown(60)
-        uni.showToast({ title: '验证码已发送', icon: 'success' })
-      } catch (e) {
-        uni.showToast({ title: e.message || '发送失败', icon: 'none' })
-      }
-    },
-
-    startCountdown(seconds) {
-      this.countdown = seconds
-      this.timer = setInterval(() => {
-        this.countdown--
-        if (this.countdown <= 0) clearInterval(this.timer)
-      }, 1000)
-    },
-
     async handleRegister() {
-      if (!this.validatePhone()) return uni.showToast({ title: '手机号格式有误', icon: 'none' })
-      if (!this.validatePassword()) return uni.showToast({ title: '密码需8位以上且包含字母和数字', icon: 'none' })
+      this.form.phone = this.form.phone.trim()
+      if (!validatePhone(this.form.phone)) return uni.showToast({ title: '手机号格式有误', icon: 'none' })
+      if (!validatePassword(this.form.password)) return uni.showToast({ title: '密码需8位以上且包含字母和数字', icon: 'none' })
       if (this.form.password !== this.form.confirmPassword) return uni.showToast({ title: '两次密码不一致', icon: 'none' })
       if (!this.form.code) return uni.showToast({ title: '请输入验证码', icon: 'none' })
 

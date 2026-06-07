@@ -105,7 +105,12 @@ export default {
   },
 
   onLoad(options) {
-    this.orderId = options.orderId
+    const id = options.orderId || ''
+    if (!id || !id.trim()) {
+      uni.showToast({ title: '订单不存在', icon: 'none' })
+      return setTimeout(() => uni.navigateBack(), 1200)
+    }
+    this.orderId = id
     this.fetchDetail()
   },
 
@@ -124,7 +129,7 @@ export default {
     },
 
     handlePay() {
-      uni.navigateTo({ url: `/pages/order/pay?orderId=${this.orderId}` })
+      uni.showToast({ title: '支付功能开发中', icon: 'none' })
     },
 
     async handleCancel() {

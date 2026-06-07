@@ -36,9 +36,8 @@ const actions = {
   },
 
   async logout({ commit }) {
-    await logout()
+    await logout()                 // api/auth.js logout 已在 finally 中调用 clearTokens()
     commit('CLEAR_AUTH')
-    clearTokens()
   },
 }
 

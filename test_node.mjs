@@ -51,17 +51,34 @@ const SECRET_KEY = 'uni_order_2024_key'
 
 const encrypt = (pw) => CryptoJS.SHA256(pw + SECRET_KEY).toString()
 
+const deriveKey = () => CryptoJS.enc.Utf8.parse(SECRET_KEY.padEnd(16, '0').slice(0, 16))
+
 const encryptAES = (data) => {
-  const key = CryptoJS.enc.Utf8.parse(SECRET_KEY.padEnd(16, '0').slice(0, 16))
-  return CryptoJS.AES.encrypt(JSON.stringify(data), key, {
-    mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7,
-  }).toString()
+  const key = deriveKey()
+  const iv = CryptoJS.lib.WordArray.random(16)
+  const encrypted = CryptoJS.AES.encrypt(JSON.stringify(data), key, {
+    iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
+  })
+  // IV 拼接在密文前
+  const combined = iv.concat(encrypted.ciphertext)
+  return CryptoJS.enc.Base64.stringify(combined)
 }
 
 const decryptAES = (cipher) => {
-  const key = CryptoJS.enc.Utf8.parse(SECRET_KEY.padEnd(16, '0').slice(0, 16))
-  const bytes = CryptoJS.AES.decrypt(cipher, key, {
-    mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7,
+  const key = deriveKey()
+  const combined = CryptoJS.enc.Base64.parse(cipher)
+  // 前 16 字节为 IV，剩余为密文
+  const iv = CryptoJS.lib.WordArray.create(combined.words.slice(0, 4), 16)
+  const cipherWords = combined.words.slice(4)
+  const cipherParams = CryptoJS.lib.CipherParams.create({
+    ciphertext: CryptoJS.lib.WordArray.create(cipherWords, combined.sigBytes - 16),
+  })
+  const bytes = CryptoJS.AES.decrypt(cipherParams, key, {
+    iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
   })
   return JSON.parse(bytes.toString(CryptoJS.enc.Utf8))
 }
@@ -89,10 +106,15 @@ const checkRateLimit = (key, limit = 5, windowMs = 60000) => {
   const now = Date.now()
   if (!requestMap[key]) requestMap[key] = []
   requestMap[key] = requestMap[key].filter(t => now - t < windowMs)
-  if (requestMap[key].length >= limit) {
+  // 惰性清理空记录
+  if (requestMap[key].length === 0) {
+    delete requestMap[key]
+  }
+  if (requestMap[key] && requestMap[key].length >= limit) {
     const retryAfter = Math.ceil((requestMap[key][0] + windowMs - now) / 1000)
     return { allowed: false, retryAfter }
   }
+  if (!requestMap[key]) requestMap[key] = []
   requestMap[key].push(now)
   return { allowed: true, retryAfter: 0 }
 }
@@ -170,39 +192,42 @@ const refreshAccessToken = () => new Promise((resolve, reject) => {
   })
 })
 
-const request = (options) => new Promise(async (resolve, reject) => {
+const request = async (options) => {
   const token = getToken()
   if (token && isTokenExpired(token)) {
     if (isRefreshing) {
-      pendingQueue.push({
-        resolve: (nt) => { options.header = { ...options.header, Authorization: `Bearer ${nt}` }; request(options).then(resolve, reject) },
-        reject,
+      const nt = await new Promise((resolve, reject) => {
+        pendingQueue.push({ resolve, reject })
       })
-      return
-    }
-    isRefreshing = true
-    try {
-      const nt = await refreshAccessToken()
-      processPendingQueue(null, nt)
       options.header = { ...options.header, Authorization: `Bearer ${nt}` }
-    } catch (err) {
-      processPendingQueue(err); clearTokens()
-      uni.reLaunch({ url: '/pages/auth/login' })
-      return reject(err)
-    } finally { isRefreshing = false }
+    } else {
+      isRefreshing = true
+      try {
+        const nt = await refreshAccessToken()
+        processPendingQueue(null, nt)
+        options.header = { ...options.header, Authorization: `Bearer ${nt}` }
+      } catch (err) {
+        processPendingQueue(err); clearTokens()
+        uni.reLaunch({ url: '/pages/auth/login' })
+        throw err
+      } finally { isRefreshing = false }
+    }
   } else if (token) {
     options.header = { ...options.header, Authorization: `Bearer ${token}` }
   }
-  uni.request({
-    url: `${BASE_URL}${options.url}`, method: options.method || 'GET', data: options.data,
-    header: { 'Content-Type': 'application/json', ...options.header },
-    success: (res) => {
-      if (res.statusCode === 401) { clearTokens(); uni.reLaunch({ url: '/pages/auth/login' }); return reject(new Error('unauthorized')) }
-      res.statusCode >= 200 && res.statusCode < 300 ? resolve(res.data) : reject(res.data)
-    },
-    fail: reject,
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: `${BASE_URL}${options.url}`, method: options.method || 'GET', data: options.data,
+      timeout: options.timeout || 15000,
+      header: { 'Content-Type': 'application/json', ...options.header },
+      success: (res) => {
+        if (res.statusCode === 401) { clearTokens(); uni.reLaunch({ url: '/pages/auth/login' }); return reject(new Error('unauthorized')) }
+        res.statusCode >= 200 && res.statusCode < 300 ? resolve(res.data) : reject(res.data)
+      },
+      fail: reject,
+    })
   })
-})
+}
 
 // 场景1: 无 token
 console.log('  场景1: 无 token 匿名请求')
